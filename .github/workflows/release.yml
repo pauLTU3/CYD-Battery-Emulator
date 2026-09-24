@@ -1,0 +1,50 @@
+name: Build release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e cyd
+
+      - name: Create release files
+        run: |
+          mkdir -p release
+          cp .pio/build/cyd/firmware.bin release/CYD-OTA-firmware.bin
+          python ~/.platformio/packages/tool-esptoolpy/esptool.py \
+            --chip esp32 merge_bin \
+            --output release/CYD-factory-firmware.bin \
+            --flash_mode dio \
+            --flash_freq 40m \
+            --flash_size 4MB \
+            0x1000 .pio/build/cyd/bootloader.bin \
+            0x8000 .pio/build/cyd/partitions.bin \
+            0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
+            0x10000 .pio/build/cyd/firmware.bin
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.bin
+          generate_release_notes: true
+          body: |
+            **CYD-OTA-firmware.bin** - for updating through the CYD OTA web page.
+            **CYD-factory-firmware.bin** - full image for a first-time USB flash.

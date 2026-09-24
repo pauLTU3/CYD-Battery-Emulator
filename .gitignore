@@ -1,0 +1,5 @@
+.pio
+.vscode/
+backup/
+SquareLine_Project/
+web-installer/firmware.factory.bin
