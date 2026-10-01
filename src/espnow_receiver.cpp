@@ -735,9 +735,17 @@ void update_main_ip_label() {
         lv_obj_set_style_text_font(g_main_ip_label, &lv_font_montserrat_10, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(g_main_ip_label, lv_color_white(), LV_PART_MAIN | LV_STATE_DEFAULT);
     }
-    char text[24];
-    const char *ip = screen_network_is_sta_connected() ? screen_network_sta_ip() : WiFi.softAPIP().toString().c_str();
-    snprintf(text, sizeof(text), "IP %s", (ip != nullptr && ip[0] != '\0') ? ip : "--");
+    char text[56];
+    const bool sta_connected = screen_network_is_sta_connected();
+    const String ap_ip = WiFi.softAPIP().toString();
+    const char *ip = sta_connected ? screen_network_sta_ip() : ap_ip.c_str();
+    if (sta_connected) {
+        snprintf(text, sizeof(text), "IP %s", (ip != nullptr && ip[0] != '\0') ? ip : "--");
+    } else {
+        snprintf(text, sizeof(text), "IP %s  PW %s",
+                 (ip != nullptr && ip[0] != '\0') ? ip : "--",
+                 screen_network_ap_password());
+    }
     set_label_text(g_main_ip_label, text);
 }
 

@@ -40,7 +40,7 @@
 
     <section class="card">
       <ol>
-        <li>Use Google Chrome or Microsoft Edge on a desktop computer.</li>
+        <li>Use a desktop browser with Web Serial support, such as Firefox, Google Chrome, or Microsoft Edge.</li>
         <li>Connect the CYD with a USB data cable.</li>
         <li>Click the install button and select the CYD serial port.</li>
         <li>Choose <strong>Erase device</strong> when installing for the first time.</li>
@@ -49,14 +49,15 @@
       <div class="install">
         <esp-web-install-button manifest="manifest.json">
           <button slot="activate">Install CYD firmware</button>
-          <span slot="unsupported">Web Serial is not available. Open this page in Chrome or Edge.</span>
+          <span slot="unsupported">Web Serial is not available in this browser. Try an up-to-date Firefox, Chrome, or Edge browser on a desktop computer.</span>
         </esp-web-install-button>
       </div>
 
       <p class="note">
         If connection fails, hold the <strong>BOOT</strong> button while connecting and release it when flashing starts.
-        After installation, connect to <code>BatteryEmulator-CYD</code> Wi-Fi and open
-        <a href="http://192.168.4.1">192.168.4.1</a> to configure the display.
+        After installation, connect to the <code>BatteryEmulator-CYD-XXXX</code> Wi-Fi network and open
+        <a href="http://192.168.4.1">192.168.4.1</a> to configure the display. The display shows the
+        device-specific password; use it both for Wi-Fi and for the web login with username <code>admin</code>.
       </p>
     </section>
   </main>

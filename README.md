@@ -49,7 +49,8 @@ If ESP-NOW is not enabled, the CYD display will not receive battery data.
 
 For a first-time installation, connect the CYD to a computer with a USB data
 cable and open the [CYD web installer](https://paultu3.github.io/CYD-Battery-Emulator/)
-in Google Chrome or Microsoft Edge. Select the CYD serial port and choose
+in an up-to-date desktop browser with Web Serial support, such as Firefox,
+Google Chrome, or Microsoft Edge. Select the CYD serial port and choose
 **Erase device** when prompted.
 
 The installer always builds and publishes the latest firmware from the `main`
@@ -64,23 +65,29 @@ and upload it on the CYD OTA web page.
 
 ## Web page
 
-The screen creates its own Wi-Fi access point so it can always be configured.
+The screen creates a password-protected Wi-Fi access point while it is not
+connected to your configured Wi-Fi network. It turns the access point off after
+the connection succeeds and restores it if that connection is lost.
 
 Default AP name:
 
-- `BatteryEmulator-CYD`
+- `BatteryEmulator-CYD-XXXX` (the suffix identifies your display)
 
 Default AP web address:
 
 - `192.168.4.1`
 
+The display shows its device-specific password next to the AP address. Use that
+password to join the AP, then sign in to the web page with username `admin` and
+the same password. It is also printed to the USB serial log for recovery.
+
 From the web page you can:
 
-- enter Wi-Fi name and password
+- enter Wi-Fi name and password (a saved password is never returned to the browser)
 - set static IP if needed
 - forget saved Wi-Fi
 - restart the screen
-- upload firmware with OTA
+- upload firmware with authenticated OTA
 
 Web page:
 

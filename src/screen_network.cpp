@@ -11,6 +11,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
 
 #include <cstdio>
 
@@ -21,6 +22,9 @@ constexpr uint8_t AP_CHANNEL = 1;
 
 constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 20000;
 constexpr size_t MAX_STR_VALUE = 64;
+constexpr size_t ADMIN_PASSWORD_LENGTH = 12;
+constexpr char ADMIN_USER[] = "admin";
+constexpr char PASSWORD_ALPHABET[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
 struct NetworkConfig {
     char ssid[MAX_STR_VALUE] = {0};
@@ -37,6 +41,7 @@ Preferences g_preferences;
 WebServer g_server(80);
 NetworkConfig g_config;
 char g_ap_ssid[32] = {0};
+char g_admin_password[ADMIN_PASSWORD_LENGTH + 1] = {0};
 char g_hostname[32] = {0};
 char g_sta_ssid[64] = {0};
 char g_sta_ip[16] = {0};
@@ -44,6 +49,7 @@ uint32_t g_last_wifi_attempt_ms = 0;
 bool g_update_reboot_pending = false;
 uint32_t g_update_reboot_due_ms = 0;
 bool g_mdns_started = false;
+bool g_ap_active = false;
 
 // Result page shown after save/forget/restart/update actions.
 String recovery_page(const __FlashStringHelper *title,
@@ -134,6 +140,65 @@ void copy_string(char *destination, size_t destination_size, const String &sourc
 
     strncpy(destination, source.c_str(), destination_size - 1);
     destination[destination_size - 1] = '\0';
+}
+
+// Generate and persist a device-specific password for the setup AP and web UI.
+void load_or_create_admin_password() {
+    g_preferences.begin("security", false);
+    const String saved_password = g_preferences.getString("admin_pass", "");
+
+    if (saved_password.length() >= 8 && saved_password.length() <= ADMIN_PASSWORD_LENGTH) {
+        copy_string(g_admin_password, sizeof(g_admin_password), saved_password);
+    } else {
+        constexpr size_t alphabet_size = sizeof(PASSWORD_ALPHABET) - 1;
+        for (size_t i = 0; i < ADMIN_PASSWORD_LENGTH; ++i) {
+            g_admin_password[i] = PASSWORD_ALPHABET[esp_random() % alphabet_size];
+        }
+        g_admin_password[ADMIN_PASSWORD_LENGTH] = '\0';
+        g_preferences.putString("admin_pass", g_admin_password);
+    }
+
+    g_preferences.end();
+}
+
+// Require HTTP Basic authentication before serving configuration or OTA routes.
+bool require_authentication() {
+    if (g_server.authenticate(ADMIN_USER, g_admin_password)) {
+        return true;
+    }
+
+    g_server.requestAuthentication(BASIC_AUTH, "CYD setup", "Authentication required");
+    return false;
+}
+
+// Start the protected setup AP when the station connection is unavailable.
+void start_ap() {
+    if (g_ap_active) {
+        return;
+    }
+
+    WiFi.mode(WIFI_AP_STA);
+    g_ap_active = WiFi.softAP(g_ap_ssid, g_admin_password, AP_CHANNEL, false, 4);
+    if (g_ap_active) {
+        Serial.printf("Screen AP ready: ssid=%s ip=%s channel=%u\n",
+                      g_ap_ssid,
+                      WiFi.softAPIP().toString().c_str(),
+                      static_cast<unsigned>(AP_CHANNEL));
+        Serial.printf("Setup login: user=%s password=%s\n", ADMIN_USER, g_admin_password);
+    } else {
+        Serial.println("Screen AP failed to start");
+    }
+}
+
+// Stop advertising the setup AP after the station connection succeeds.
+void stop_ap() {
+    if (!g_ap_active) {
+        return;
+    }
+
+    WiFi.softAPdisconnect(false);
+    g_ap_active = false;
+    Serial.println("Screen AP disabled after STA connection");
 }
 
 // Load saved network settings from NVS.
@@ -270,6 +335,10 @@ String checked_attr(bool checked) {
 
 // Main configuration page served by the screen.
 void handle_root() {
+    if (!require_authentication()) {
+        return;
+    }
+
     String page;
     page.reserve(7000);
 
@@ -296,7 +365,7 @@ void handle_root() {
     page += F("<div><strong>AP SSID:</strong> ");
     page += html_escape(g_ap_ssid);
     page += F("</div><div><strong>AP IP:</strong> ");
-    page += WiFi.softAPIP().toString();
+    page += g_ap_active ? WiFi.softAPIP().toString() : F("Disabled while STA is connected");
     page += F("</div><div><strong>STA Status:</strong> ");
     page += station_status_text();
     page += F("</div><div><strong>STA IP:</strong> ");
@@ -313,9 +382,8 @@ void handle_root() {
     page += F("<label>SSID</label>");
     page += input_value("ssid", g_config.ssid, "Your Wi-Fi name");
     page += F("<label>Password</label>");
-    page += F("<input type=\"password\" name=\"password\" value=\"");
-    page += html_escape(g_config.password);
-    page += F("\" placeholder=\"Wi-Fi password\">");
+    page += F("<input type=\"password\" name=\"password\" value=\"\" autocomplete=\"new-password\" placeholder=\"Leave blank to keep the saved password\">");
+    page += F("<label><input type=\"checkbox\" name=\"clear_password\" value=\"1\" style=\"width:auto;margin-right:8px;\">Clear the saved password (open Wi-Fi network)</label>");
 
     page += F("<h2 style=\"margin-top:18px;\">IP Settings</h2>");
     page += F("<label><input type=\"checkbox\" name=\"use_static\" value=\"1\" style=\"width:auto;margin-right:8px;\"");
@@ -342,13 +410,23 @@ void handle_root() {
     page += F("<button class=\"ok\" type=\"submit\">Upload Firmware</button></form>");
     page += F("</div></div></body></html>");
 
+    g_server.sendHeader("Cache-Control", "no-store");
+    g_server.sendHeader("X-Frame-Options", "DENY");
     g_server.send(200, "text/html", page);
 }
 
 // Save web form settings and start reconnect logic.
 void handle_save() {
+    if (!require_authentication()) {
+        return;
+    }
+
     copy_string(g_config.ssid, sizeof(g_config.ssid), g_server.arg("ssid"));
-    copy_string(g_config.password, sizeof(g_config.password), g_server.arg("password"));
+    if (g_server.hasArg("clear_password")) {
+        g_config.password[0] = '\0';
+    } else if (!g_server.arg("password").isEmpty()) {
+        copy_string(g_config.password, sizeof(g_config.password), g_server.arg("password"));
+    }
     g_config.use_static_ip = g_server.hasArg("use_static");
     copy_string(g_config.local_ip, sizeof(g_config.local_ip), g_server.arg("local_ip"));
     copy_string(g_config.gateway, sizeof(g_config.gateway), g_server.arg("gateway"));
@@ -368,9 +446,14 @@ void handle_save() {
 
 // Delete saved credentials and go back to AP-only mode.
 void handle_forget() {
+    if (!require_authentication()) {
+        return;
+    }
+
     memset(&g_config, 0, sizeof(g_config));
     save_config();
     WiFi.disconnect(false, true);
+    start_ap();
     g_server.send(200,
                   "text/html",
                   recovery_page(F("Wi-Fi removed"),
@@ -380,6 +463,10 @@ void handle_forget() {
 
 // Manual reboot endpoint from the web page.
 void handle_restart() {
+    if (!require_authentication()) {
+        return;
+    }
+
     g_server.send(200,
                   "text/html",
                   recovery_page(F("Restarting"),
@@ -391,6 +478,10 @@ void handle_restart() {
 
 // Final OTA page shown after upload finishes.
 void handle_update_result() {
+    if (!require_authentication()) {
+        return;
+    }
+
     const bool ok = !Update.hasError();
     g_server.send(200,
                   "text/html",
@@ -408,6 +499,10 @@ void handle_update_result() {
 
 // Streaming handler called by WebServer during OTA file upload.
 void handle_update_upload() {
+    if (!g_server.authenticate(ADMIN_USER, g_admin_password)) {
+        return;
+    }
+
     HTTPUpload &upload = g_server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
@@ -460,12 +555,14 @@ void setup_server() {
 }  // namespace
 
 void screen_network_init() {
-    // Fixed names used by this project.
-    snprintf(g_ap_ssid, sizeof(g_ap_ssid), "BatteryEmulator-CYD");
+    // Add a chip-specific suffix so nearby displays can be distinguished.
+    const uint16_t chip_suffix = static_cast<uint16_t>(ESP.getEfuseMac() & 0xFFFFU);
+    snprintf(g_ap_ssid, sizeof(g_ap_ssid), "BatteryEmulator-CYD-%04X", chip_suffix);
     snprintf(g_hostname, sizeof(g_hostname), "batteryemulator-cyd");
 
     // Load saved settings before touching Wi-Fi.
     load_config();
+    load_or_create_admin_password();
 
     // Keep Wi-Fi persistence under our own Preferences storage.
     WiFi.persistent(false);
@@ -474,14 +571,9 @@ void screen_network_init() {
     // AP+STA lets the screen host its own setup AP and still join normal Wi-Fi.
     WiFi.mode(WIFI_AP_STA);
 
-    // Start AP immediately so the user can always reach the device.
-    WiFi.softAP(g_ap_ssid, nullptr, AP_CHANNEL, false, 4);
+    // Start a protected AP until the station connection succeeds.
+    start_ap();
     WiFi.setHostname(g_hostname);
-
-    Serial.printf("Screen AP ready: ssid=%s ip=%s channel=%u\n",
-                  g_ap_ssid,
-                  WiFi.softAPIP().toString().c_str(),
-                  static_cast<unsigned>(AP_CHANNEL));
 
     // Try STA Wi-Fi too when credentials already exist.
     if (g_config.ssid[0] != '\0') {
@@ -498,10 +590,14 @@ void screen_network_update() {
 
     // Start mDNS once a real STA connection exists.
     if (WiFi.status() == WL_CONNECTED) {
+        stop_ap();
         setup_mdns();
-    } else if (g_config.ssid[0] != '\0' && (millis() - g_last_wifi_attempt_ms) >= WIFI_RETRY_INTERVAL_MS) {
-        // Retry Wi-Fi every few seconds when credentials exist.
-        begin_sta_connect();
+    } else {
+        start_ap();
+        if (g_config.ssid[0] != '\0' && (millis() - g_last_wifi_attempt_ms) >= WIFI_RETRY_INTERVAL_MS) {
+            // Retry Wi-Fi every few seconds when credentials exist.
+            begin_sta_connect();
+        }
     }
 
     // Reboot after OTA once the browser already received the completion page.
@@ -545,6 +641,10 @@ int screen_network_sta_rssi() {
 
 const char *screen_network_ap_ssid() {
     return g_ap_ssid;
+}
+
+const char *screen_network_ap_password() {
+    return g_admin_password;
 }
 
 const char *screen_network_hostname() {
