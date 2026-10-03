@@ -56,6 +56,9 @@ Google Chrome, or Microsoft Edge. Select the CYD serial port and choose
 The installer always builds and publishes the latest firmware from the `main`
 branch. Existing installations can still be updated from the CYD OTA web page.
 
+Version changes are listed in [CHANGELOG.md](./CHANGELOG.md). GitHub releases
+automatically use the matching version section as their release description.
+
 ## Updating (OTA)
 
 After the first USB install, you do not need the web installer again.

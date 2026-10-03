@@ -40,11 +40,18 @@ jobs:
             0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
             0x10000 .pio/build/cyd/firmware.bin
 
+      - name: Create release notes from changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v header="## [$version]" '
+            index($0, header) == 1 { publishing = 1; next }
+            publishing && /^## \[/ { exit }
+            publishing { print }
+          ' CHANGELOG.md > release/RELEASE_NOTES.md
+          test -s release/RELEASE_NOTES.md
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*.bin
-          generate_release_notes: true
-          body: |
-            **CYD-OTA-firmware.bin** - for updating through the CYD OTA web page.
-            **CYD-factory-firmware.bin** - full image for a first-time USB flash.
+          body_path: release/RELEASE_NOTES.md
