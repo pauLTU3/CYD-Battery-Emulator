@@ -77,12 +77,16 @@ Default AP web address:
 
 - `192.168.4.1`
 
-Access protection is off by default, so the AP and web page do not initially
-ask for a password. You can enable **Access Protection** on the web page and
-choose your own 8-63 character password. When enabled, the same password
-protects the AP and web page; the web username is `admin`.
+Default AP password:
 
-> When access protection is off, anyone who can reach the device can change its
+- `123456789`
+
+The web page does not initially ask for an administrator login. You can enable
+**Web Admin Protection** and choose your own 8-63 character admin password.
+When enabled, the web username is `admin`. This admin password is separate from
+the Wi-Fi AP password.
+
+> When web protection is off, anyone connected to the device can change its
 > settings or upload firmware. Enable protection when the display is used in an
 > untrusted location or network.
 
@@ -92,7 +96,7 @@ From the web page you can:
 - set static IP if needed
 - forget saved Wi-Fi
 - restart the screen
-- upload firmware with OTA (authentication is required when Access Protection is enabled)
+- upload firmware with OTA (authentication is required when Web Admin Protection is enabled)
 
 Web page:
 

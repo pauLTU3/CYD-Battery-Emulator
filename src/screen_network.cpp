@@ -22,6 +22,7 @@ constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 20000;
 constexpr size_t MAX_STR_VALUE = 64;
 constexpr char ADMIN_USER[] = "admin";
+constexpr char AP_PASSWORD[] = "123456789";
 
 struct NetworkConfig {
     char ssid[MAX_STR_VALUE] = {0};
@@ -184,20 +185,17 @@ void start_ap() {
     }
 
     WiFi.mode(WIFI_AP_STA);
-    g_ap_active = WiFi.softAP(g_ap_ssid,
-                              g_security_enabled ? g_admin_password : nullptr,
-                              AP_CHANNEL,
-                              false,
-                              4);
+    g_ap_active = WiFi.softAP(g_ap_ssid, AP_PASSWORD, AP_CHANNEL, false, 4);
     if (g_ap_active) {
         Serial.printf("Screen AP ready: ssid=%s ip=%s channel=%u\n",
                       g_ap_ssid,
                       WiFi.softAPIP().toString().c_str(),
                       static_cast<unsigned>(AP_CHANNEL));
+        Serial.printf("Access point password: %s\n", AP_PASSWORD);
         if (g_security_enabled) {
-            Serial.printf("Setup protection enabled: user=%s password=%s\n", ADMIN_USER, g_admin_password);
+            Serial.printf("Web protection enabled: user=%s password=%s\n", ADMIN_USER, g_admin_password);
         } else {
-            Serial.println("WARNING: setup AP and web interface are not password protected");
+            Serial.println("WARNING: web interface is not password protected");
         }
     } else {
         Serial.println("Screen AP failed to start");
@@ -379,6 +377,8 @@ void handle_root() {
     page += F("<div><strong>Firmware Version:</strong> " CYD_FIRMWARE_VERSION " (" CYD_PROTOCOL_VERSION ")</div>");
     page += F("<div><strong>AP SSID:</strong> ");
     page += html_escape(g_ap_ssid);
+    page += F("</div><div><strong>AP Password:</strong> ");
+    page += AP_PASSWORD;
     page += F("</div><div><strong>AP IP:</strong> ");
     page += g_ap_active ? WiFi.softAPIP().toString() : F("Disabled while STA is connected");
     page += F("</div><div><strong>STA Status:</strong> ");
@@ -419,18 +419,18 @@ void handle_root() {
     page += F("<form method=\"post\" action=\"/restart\"><button class=\"warn\" type=\"submit\">Restart Screen</button></form>");
     page += F("</div>");
 
-    page += F("<div class=\"card\"><h2>Access Protection</h2>");
+    page += F("<div class=\"card\"><h2>Web Admin Protection</h2>");
     if (!g_security_enabled) {
-        page += F("<div class=\"security-warning\"><strong>Protection is off.</strong> Anyone who can reach this device can change settings or upload firmware.</div>");
+        page += F("<div class=\"security-warning\"><strong>Web protection is off.</strong> Anyone connected to the device can change settings or upload firmware.</div>");
     }
     page += F("<form method=\"post\" action=\"/security\">");
     page += F("<label><input type=\"checkbox\" name=\"security_enabled\" value=\"1\" style=\"width:auto;margin-right:8px;\"");
     page += checked_attr(g_security_enabled);
-    page += F(">Require a password for the AP and web page</label>");
-    page += F("<label>New password</label>");
+    page += F(">Require an admin password for the web page and OTA</label>");
+    page += F("<label>New web admin password</label>");
     page += F("<input type=\"password\" name=\"admin_password\" value=\"\" minlength=\"8\" maxlength=\"63\" autocomplete=\"new-password\" placeholder=\"8-63 characters; blank keeps the current password\">");
-    page += F("<p>When enabled, use username <code>admin</code> and this password. Saving restarts the screen.</p>");
-    page += F("<button class=\"primary\" type=\"submit\">Save Access Protection</button></form></div>");
+    page += F("<p>This is separate from the Wi-Fi AP password. When enabled, use username <code>admin</code>. Saving restarts the screen.</p>");
+    page += F("<button class=\"primary\" type=\"submit\">Save Web Protection</button></form></div>");
 
     page += F("<div class=\"card\"><h2>OTA Update</h2>");
     page += F("<form method=\"post\" action=\"/update\" enctype=\"multipart/form-data\">");
@@ -443,7 +443,7 @@ void handle_root() {
     g_server.send(200, "text/html", page);
 }
 
-// Enable, disable or change optional AP/web access protection.
+// Enable, disable or change optional web administration protection.
 void handle_security() {
     if (!require_authentication()) {
         return;
@@ -456,7 +456,7 @@ void handle_security() {
         g_server.send(400,
                       "text/html",
                       recovery_page(F("Password required"),
-                                    F("Enter a password containing 8 to 63 characters before enabling protection."),
+                                    F("Enter an admin password containing 8 to 63 characters before enabling web protection."),
                                     false));
         return;
     }
@@ -465,7 +465,7 @@ void handle_security() {
         g_server.send(400,
                       "text/html",
                       recovery_page(F("Invalid password"),
-                                    F("The access password must contain 8 to 63 characters."),
+                                    F("The web admin password must contain 8 to 63 characters."),
                                     false));
         return;
     }
@@ -478,10 +478,10 @@ void handle_security() {
 
     g_server.send(200,
                   "text/html",
-                  recovery_page(F("Access protection saved"),
+                  recovery_page(F("Web protection saved"),
                                 enable_security
-                                    ? F("Protection is enabled. Reconnect using the password you selected.")
-                                    : F("Protection is disabled. The AP and web page will be open after restart."),
+                                    ? F("Web protection is enabled. Sign in as admin using the password you selected.")
+                                    : F("Web protection is disabled. The web page will be open after restart."),
                                 true));
     delay(500);
     ESP.restart();
@@ -717,7 +717,7 @@ const char *screen_network_ap_ssid() {
 }
 
 const char *screen_network_ap_password() {
-    return g_security_enabled ? g_admin_password : nullptr;
+    return AP_PASSWORD;
 }
 
 const char *screen_network_hostname() {
