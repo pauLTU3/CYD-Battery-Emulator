@@ -11,7 +11,6 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
-#include <esp_system.h>
 
 #include <cstdio>
 
@@ -22,9 +21,7 @@ constexpr uint8_t AP_CHANNEL = 1;
 
 constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 20000;
 constexpr size_t MAX_STR_VALUE = 64;
-constexpr size_t ADMIN_PASSWORD_LENGTH = 12;
 constexpr char ADMIN_USER[] = "admin";
-constexpr char PASSWORD_ALPHABET[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
 struct NetworkConfig {
     char ssid[MAX_STR_VALUE] = {0};
@@ -41,7 +38,7 @@ Preferences g_preferences;
 WebServer g_server(80);
 NetworkConfig g_config;
 char g_ap_ssid[32] = {0};
-char g_admin_password[ADMIN_PASSWORD_LENGTH + 1] = {0};
+char g_admin_password[MAX_STR_VALUE] = {0};
 char g_hostname[32] = {0};
 char g_sta_ssid[64] = {0};
 char g_sta_ip[16] = {0};
@@ -50,6 +47,7 @@ bool g_update_reboot_pending = false;
 uint32_t g_update_reboot_due_ms = 0;
 bool g_mdns_started = false;
 bool g_ap_active = false;
+bool g_security_enabled = false;
 
 // Result page shown after save/forget/restart/update actions.
 String recovery_page(const __FlashStringHelper *title,
@@ -142,27 +140,35 @@ void copy_string(char *destination, size_t destination_size, const String &sourc
     destination[destination_size - 1] = '\0';
 }
 
-// Generate and persist a device-specific password for the setup AP and web UI.
-void load_or_create_admin_password() {
-    g_preferences.begin("security", false);
+// Load optional AP and web access protection settings.
+void load_security_config() {
+    g_preferences.begin("security", true);
+    g_security_enabled = g_preferences.getBool("enabled", false);
     const String saved_password = g_preferences.getString("admin_pass", "");
 
-    if (saved_password.length() >= 8 && saved_password.length() <= ADMIN_PASSWORD_LENGTH) {
+    if (saved_password.length() >= 8 && saved_password.length() < MAX_STR_VALUE) {
         copy_string(g_admin_password, sizeof(g_admin_password), saved_password);
     } else {
-        constexpr size_t alphabet_size = sizeof(PASSWORD_ALPHABET) - 1;
-        for (size_t i = 0; i < ADMIN_PASSWORD_LENGTH; ++i) {
-            g_admin_password[i] = PASSWORD_ALPHABET[esp_random() % alphabet_size];
-        }
-        g_admin_password[ADMIN_PASSWORD_LENGTH] = '\0';
-        g_preferences.putString("admin_pass", g_admin_password);
+        g_admin_password[0] = '\0';
+        g_security_enabled = false;
     }
 
     g_preferences.end();
 }
 
+void save_security_config() {
+    g_preferences.begin("security", false);
+    g_preferences.putBool("enabled", g_security_enabled);
+    g_preferences.putString("admin_pass", g_admin_password);
+    g_preferences.end();
+}
+
 // Require HTTP Basic authentication before serving configuration or OTA routes.
 bool require_authentication() {
+    if (!g_security_enabled) {
+        return true;
+    }
+
     if (g_server.authenticate(ADMIN_USER, g_admin_password)) {
         return true;
     }
@@ -178,13 +184,21 @@ void start_ap() {
     }
 
     WiFi.mode(WIFI_AP_STA);
-    g_ap_active = WiFi.softAP(g_ap_ssid, g_admin_password, AP_CHANNEL, false, 4);
+    g_ap_active = WiFi.softAP(g_ap_ssid,
+                              g_security_enabled ? g_admin_password : nullptr,
+                              AP_CHANNEL,
+                              false,
+                              4);
     if (g_ap_active) {
         Serial.printf("Screen AP ready: ssid=%s ip=%s channel=%u\n",
                       g_ap_ssid,
                       WiFi.softAPIP().toString().c_str(),
                       static_cast<unsigned>(AP_CHANNEL));
-        Serial.printf("Setup login: user=%s password=%s\n", ADMIN_USER, g_admin_password);
+        if (g_security_enabled) {
+            Serial.printf("Setup protection enabled: user=%s password=%s\n", ADMIN_USER, g_admin_password);
+        } else {
+            Serial.println("WARNING: setup AP and web interface are not password protected");
+        }
     } else {
         Serial.println("Screen AP failed to start");
     }
@@ -356,6 +370,7 @@ void handle_root() {
               ".ok{background:#43a047;color:#fff;}.muted{background:#353b45;color:#e8eaed;}"
               ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;}"
               ".note{background:#1d2530;border:1px solid #3c6e91;border-radius:10px;padding:12px;margin-bottom:16px;}"
+              ".security-warning{background:#3a2418;border:1px solid #f9a825;border-radius:10px;padding:12px;margin-bottom:12px;}"
               "code{background:#222833;color:#e8eaed;padding:2px 6px;border-radius:6px;}"
               "</style></head><body><div class=\"wrap\">");
 
@@ -404,6 +419,19 @@ void handle_root() {
     page += F("<form method=\"post\" action=\"/restart\"><button class=\"warn\" type=\"submit\">Restart Screen</button></form>");
     page += F("</div>");
 
+    page += F("<div class=\"card\"><h2>Access Protection</h2>");
+    if (!g_security_enabled) {
+        page += F("<div class=\"security-warning\"><strong>Protection is off.</strong> Anyone who can reach this device can change settings or upload firmware.</div>");
+    }
+    page += F("<form method=\"post\" action=\"/security\">");
+    page += F("<label><input type=\"checkbox\" name=\"security_enabled\" value=\"1\" style=\"width:auto;margin-right:8px;\"");
+    page += checked_attr(g_security_enabled);
+    page += F(">Require a password for the AP and web page</label>");
+    page += F("<label>New password</label>");
+    page += F("<input type=\"password\" name=\"admin_password\" value=\"\" minlength=\"8\" maxlength=\"63\" autocomplete=\"new-password\" placeholder=\"8-63 characters; blank keeps the current password\">");
+    page += F("<p>When enabled, use username <code>admin</code> and this password. Saving restarts the screen.</p>");
+    page += F("<button class=\"primary\" type=\"submit\">Save Access Protection</button></form></div>");
+
     page += F("<div class=\"card\"><h2>OTA Update</h2>");
     page += F("<form method=\"post\" action=\"/update\" enctype=\"multipart/form-data\">");
     page += F("<label>Firmware File (.bin)</label><input type=\"file\" name=\"firmware\">");
@@ -413,6 +441,50 @@ void handle_root() {
     g_server.sendHeader("Cache-Control", "no-store");
     g_server.sendHeader("X-Frame-Options", "DENY");
     g_server.send(200, "text/html", page);
+}
+
+// Enable, disable or change optional AP/web access protection.
+void handle_security() {
+    if (!require_authentication()) {
+        return;
+    }
+
+    const bool enable_security = g_server.hasArg("security_enabled");
+    const String new_password = g_server.arg("admin_password");
+
+    if (enable_security && !g_security_enabled && new_password.isEmpty()) {
+        g_server.send(400,
+                      "text/html",
+                      recovery_page(F("Password required"),
+                                    F("Enter a password containing 8 to 63 characters before enabling protection."),
+                                    false));
+        return;
+    }
+
+    if (!new_password.isEmpty() && (new_password.length() < 8 || new_password.length() >= MAX_STR_VALUE)) {
+        g_server.send(400,
+                      "text/html",
+                      recovery_page(F("Invalid password"),
+                                    F("The access password must contain 8 to 63 characters."),
+                                    false));
+        return;
+    }
+
+    if (!new_password.isEmpty()) {
+        copy_string(g_admin_password, sizeof(g_admin_password), new_password);
+    }
+    g_security_enabled = enable_security;
+    save_security_config();
+
+    g_server.send(200,
+                  "text/html",
+                  recovery_page(F("Access protection saved"),
+                                enable_security
+                                    ? F("Protection is enabled. Reconnect using the password you selected.")
+                                    : F("Protection is disabled. The AP and web page will be open after restart."),
+                                true));
+    delay(500);
+    ESP.restart();
 }
 
 // Save web form settings and start reconnect logic.
@@ -499,7 +571,7 @@ void handle_update_result() {
 
 // Streaming handler called by WebServer during OTA file upload.
 void handle_update_upload() {
-    if (!g_server.authenticate(ADMIN_USER, g_admin_password)) {
+    if (g_security_enabled && !g_server.authenticate(ADMIN_USER, g_admin_password)) {
         return;
     }
 
@@ -546,6 +618,7 @@ void setup_mdns() {
 void setup_server() {
     g_server.on("/", HTTP_GET, handle_root);
     g_server.on("/save", HTTP_POST, handle_save);
+    g_server.on("/security", HTTP_POST, handle_security);
     g_server.on("/forget", HTTP_POST, handle_forget);
     g_server.on("/restart", HTTP_POST, handle_restart);
     g_server.on("/update", HTTP_POST, handle_update_result, handle_update_upload);
@@ -562,7 +635,7 @@ void screen_network_init() {
 
     // Load saved settings before touching Wi-Fi.
     load_config();
-    load_or_create_admin_password();
+    load_security_config();
 
     // Keep Wi-Fi persistence under our own Preferences storage.
     WiFi.persistent(false);
@@ -644,7 +717,7 @@ const char *screen_network_ap_ssid() {
 }
 
 const char *screen_network_ap_password() {
-    return g_admin_password;
+    return g_security_enabled ? g_admin_password : nullptr;
 }
 
 const char *screen_network_hostname() {

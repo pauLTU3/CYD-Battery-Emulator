@@ -65,9 +65,9 @@ and upload it on the CYD OTA web page.
 
 ## Web page
 
-The screen creates a password-protected Wi-Fi access point while it is not
-connected to your configured Wi-Fi network. It turns the access point off after
-the connection succeeds and restores it if that connection is lost.
+The screen creates a Wi-Fi access point while it is not connected to your
+configured Wi-Fi network. It turns the access point off after the connection
+succeeds and restores it if that connection is lost.
 
 Default AP name:
 
@@ -77,9 +77,14 @@ Default AP web address:
 
 - `192.168.4.1`
 
-The display shows its device-specific password next to the AP address. Use that
-password to join the AP, then sign in to the web page with username `admin` and
-the same password. It is also printed to the USB serial log for recovery.
+Access protection is off by default, so the AP and web page do not initially
+ask for a password. You can enable **Access Protection** on the web page and
+choose your own 8-63 character password. When enabled, the same password
+protects the AP and web page; the web username is `admin`.
+
+> When access protection is off, anyone who can reach the device can change its
+> settings or upload firmware. Enable protection when the display is used in an
+> untrusted location or network.
 
 From the web page you can:
 
@@ -87,7 +92,7 @@ From the web page you can:
 - set static IP if needed
 - forget saved Wi-Fi
 - restart the screen
-- upload firmware with authenticated OTA
+- upload firmware with OTA (authentication is required when Access Protection is enabled)
 
 Web page:
 

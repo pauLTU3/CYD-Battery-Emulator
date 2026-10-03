@@ -742,9 +742,15 @@ void update_main_ip_label() {
     if (sta_connected) {
         snprintf(text, sizeof(text), "IP %s", (ip != nullptr && ip[0] != '\0') ? ip : "--");
     } else {
-        snprintf(text, sizeof(text), "IP %s  PW %s",
-                 (ip != nullptr && ip[0] != '\0') ? ip : "--",
-                 screen_network_ap_password());
+        const char *ap_password = screen_network_ap_password();
+        if (ap_password != nullptr && ap_password[0] != '\0') {
+            snprintf(text, sizeof(text), "IP %s  PW %s",
+                     (ip != nullptr && ip[0] != '\0') ? ip : "--",
+                     ap_password);
+        } else {
+            snprintf(text, sizeof(text), "IP %s  AP OPEN",
+                     (ip != nullptr && ip[0] != '\0') ? ip : "--");
+        }
     }
     set_label_text(g_main_ip_label, text);
 }
